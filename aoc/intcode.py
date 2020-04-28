@@ -13,6 +13,18 @@ def make_instruction(code):
         return Add(modes)
     elif instruction == 2:
         return Multiply(modes)
+    elif instruction == 3:
+        return ReadInput(modes)
+    elif instruction == 4:
+        return PrintOutput(modes)
+    elif instruction == 5:
+        return JumpIfTrue(modes)
+    elif instruction == 6:
+        return JumpIfFalse(modes)
+    elif instruction == 7:
+        return LessThan(modes)
+    elif instruction == 8:
+        return Equals(modes)
     else:
         raise IOError('Unknown instruction.')
 
@@ -20,18 +32,24 @@ class Operator:
     def __init__(self, num_inputs, modes):
         self._num_inputs = num_inputs
         self._modes = modes
+        self._advance_steps = 1 + self._num_inputs
+        self._current_program = None
 
     def exec(self, program):
-        advance_steps = 1 + self._num_inputs
-        inputs = self._read_inputs(program)
-        output = self._do_operation(inputs)
-        if output is not None:
-            self._write_output(program, output)
-            advance_steps += 1
-        
-        program.curr_adr += advance_steps
+        self._current_program = program
 
-    def _read_inputs(self, program):
+        inputs = self._read_inputs()
+        output = self._do_operation(inputs)
+
+        has_output = 0
+        if output is not None:
+            self._write_output(output)
+            has_output = 1
+        
+        self._advance_program(has_output)
+        self._current_program = None
+
+    def _read_inputs(self):
         inputs = []
         for offset in range(1, self._num_inputs + 1):
             mode = self._modes[offset-1]
@@ -40,10 +58,10 @@ class Operator:
             unknown_mode = not(position_mode or immediate_mode)
 
             if position_mode:
-                operand_addr = program.state[program.curr_adr + offset]
-                inputs.append(program.sate[operand_addr])
+                operand_addr = self._current_program.state[self._current_program.curr_adr + offset]
+                inputs.append(self._current_program.state[operand_addr])
             elif immediate_mode:
-                operand = program.state[program.curr_adr + offset]
+                operand = self._current_program.state[self._current_program.curr_adr + offset]
                 inputs.append(operand)
             elif unknown_mode:
                 raise IOError('Unknown instruction mode.')
@@ -54,10 +72,12 @@ class Operator:
     def _do_operation(self, inputs):
         raise IOError('Not implemented')
 
-    def _write_output(self, program, output):
-        write_addr = program.state[program.curr_adr + self._num_inputs + 1]
-        program.state[write_addr] = output
+    def _write_output(self, output):
+        write_addr = self._current_program.state[self._current_program.curr_adr + self._num_inputs + 1]
+        self._current_program.state[write_addr] = output
 
+    def _advance_program(self, has_output):
+        self._current_program.curr_adr += (self._advance_steps + has_output)
 
 class Add(Operator):
     def __init__(self, modes):
@@ -72,6 +92,73 @@ class Multiply(Operator):
     
     def _do_operation(self, inputs):
         return inputs[0] * inputs[1]
+
+class ReadInput(Operator):
+    def __init__(self, modes):
+        super().__init__(0, modes)
+
+    def _do_operation(self, inputs):
+        return int(input('Enter an int:'))
+
+class PrintOutput(Operator):
+    def __init__(self, modes):
+        super().__init__(1, modes)
+
+    def _do_operation(self, inputs):
+        print(inputs[0])
+        return None
+
+class JumpIfTrue(Operator):
+    def __init__(self, modes):
+        super().__init__(2, modes)
+        self._jump_to = None
+
+    def _do_operation(self, inputs):
+        if inputs[0] != 0:
+            self._jump_to = inputs[1]
+        return None
+
+    def _advance_program(self, has_output):
+        if self._jump_to:
+            self._current_program.curr_adr = self._jump_to
+        else:
+            super()._advance_program(has_output)
+
+
+class JumpIfFalse(Operator):
+    def __init__(self, modes):
+        super().__init__(2, modes)
+        self._jump_to = None
+
+    def _do_operation(self, inputs):
+        if inputs[0] == 0:
+            self._jump_to = inputs[1]
+        return None
+
+    def _advance_program(self, has_output):
+        if self._jump_to:
+            self._current_program.curr_adr = self._jump_to
+        else:
+            super()._advance_program(has_output)
+
+class LessThan(Operator):
+    def __init__(self, modes):
+        super().__init__(2, modes)
+
+    def _do_operation(self, inputs):
+        if inputs[0] < inputs[1]:
+            return 1
+        return 0    
+
+class Equals(Operator):
+    def __init__(self, modes):
+        super().__init__(2, modes)
+
+    def _do_operation(self, inputs):
+        if inputs[0] == inputs[1]:
+            return 1
+        return 0    
+
 
 class Intcode:
     
@@ -162,30 +249,4 @@ class Intcode:
         '''
         while self.current_op != 99:
             op = make_instruction(self.current_op)
-            op.exec
-
-
-            if self.current_op in [1, 2]:
-                operand_1 = self.state[self.state[self.curr_adr + 1]]
-                operand_2 = self.state[self.state[self.curr_adr + 2]]
-                write_idx = self.state[self.curr_adr + 3]
-            else:
-                raise IOError('Unknown operation.')
-                
-
-            if self.current_op == 1:
-                self.state[write_idx] = operand_1 + operand_2
-            elif self.current_op == 2:
-                self.state[write_idx] = operand_1 * operand_2
-
-            self.curr_adr += 4
-        
-# def exec_intcode_program(noun, verb):
-#     program = Intcode()
-#     program.load_directly
-#     intcode_program = load_incode_program('incode_input.txt')
-#     intcode_program[1] = noun
-#     intcode_program[2] = verb
-#     run_intcode_program(intcode_program)
-
-#     return intcode_program[0]
+            op.exec(self)
